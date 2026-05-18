@@ -1,0 +1,9 @@
+numpy
+pandas
+scikit-learn
+matplotlib
+requests
+
+# Optional (if using Jupyter features)
+notebook
+
