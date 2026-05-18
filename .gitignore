@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.csv
+*.png
+*.sqlite3
+.DS_Store
+.vscode/
+.env
+.env.*
+*.egg-info/
+.tests/
+.pytest_cache/
+.idea/
+
+# Jupyter checkpoints
+.ipynb_checkpoints
+
+# Ignore local datasets and outputs
+/data/
+outputs/
+
+# Ignore system files
+Thumbs.db
+
+
+*.pdf
+
