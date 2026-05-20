@@ -1,0 +1,11 @@
+# Ignore IDE configuration directories
+.idea/
+
+# Ignore all datasets
+*.csv
+data/raw/
+data/processed/
+
+# Ignore all generated figures and plots
+*.png
+report/figures/
