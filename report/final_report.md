@@ -1,18 +1,5 @@
 # Crop Planting Suitability Prediction for The Gambia
 
-## Rubric Alignment
-
-This report is organized to match the project rubric:
-
-- Problem Definition & Clarity: Section 1
-- Background & Literature Review: Section 2
-- Methodology & Implementation: Section 3
-- Experimentation & Results: Section 4
-- Innovation & Originality: Section 5
-- Documentation & Reporting: Section 6
-- Presentation / Demonstration: Section 7
-- Team Collaboration: Section 8
-
 ## Abstract
 
 This project develops a climate-driven workflow for predicting crop planting suitability in The Gambia. The pipeline combines historical NASA POWER climate data, domain-inspired feature engineering, and a Random Forest model to classify days as suitable or not suitable for planting. A baseline reproduction inspired by Jeong et al. (2016) was also completed to validate the modeling approach. The resulting labeled dataset contains 61,945 daily records across five agricultural zones, with a strong class imbalance that reflects the rarity of suitable planting days. The project also supports a Streamlit application that turns the trained model into a practical decision aid for users.
