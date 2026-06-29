@@ -8,13 +8,11 @@ Training data : NASA POWER (historical 1990-2023)
 Live input     : Open-Meteo Archive API (monthly weather per zone)
 Authors        : Alassan Saine (P1) & Baboucarr Sallah (P2)
 
-Design priority: Illiterate smallholder farmers
-  - Select month + zone → one button → AI decides
-  - No manual data entry
-  - Big visual green / red result
-  - All if/else logic is DISPLAY ONLY — the RF model makes every prediction
+Design priority: Two modes:
+  1. Farmer Edition (Illiterate farmers) — Select month + zone, one button
+  2. Advanced Mode (Educated farmers) — Manual climate parameter entry
 
-Run with: streamlit run app/aapp.py  (from project root)
+Run with: streamlit run app/app.py  (from project root)
 """
 
 import sys
@@ -22,7 +20,6 @@ import warnings
 import calendar
 from pathlib import Path
 from datetime import date
-from src.config import ZONES, MODEL_FEATURES
 
 import joblib
 import numpy as np
@@ -36,14 +33,23 @@ warnings.filterwarnings("ignore")
 
 # ── Resolve project root ──────────────────────────────────────────────────────
 APP_DIR = Path(__file__).resolve().parent
-ROOT    = APP_DIR.parent
+ROOT = APP_DIR.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config import (
-    MODELS_DIR, ZONES,
-    ONSET_THRESH, SEASONAL_THRESH,
-    TEMP_MIN_SUIT, TEMP_MAX_SUIT,
-)
+try:
+    from src.config import (
+        MODELS_DIR, ZONES,
+        ONSET_THRESH, SEASONAL_THRESH,
+        TEMP_MIN_SUIT, TEMP_MAX_SUIT,
+    )
+except ImportError:
+    # Fallback config if src.config not available
+    MODELS_DIR = ROOT / "models"
+    ZONES = ["Western", "North Bank", "Lower River", "Central River", "Upper River"]
+    ONSET_THRESH = 20.0
+    SEASONAL_THRESH = 50.0
+    TEMP_MIN_SUIT = 20.0
+    TEMP_MAX_SUIT = 35.0
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG  — must be the first Streamlit call
@@ -58,38 +64,38 @@ st.set_page_config(
 # CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
 ZONE_COORDS = {
-    "Western":       {"lat": 13.4549, "lon": -16.5790},
-    "North Bank":    {"lat": 13.5460, "lon": -15.9000},
-    "Lower River":   {"lat": 13.3700, "lon": -15.0000},
+    "Western": {"lat": 13.4549, "lon": -16.5790},
+    "North Bank": {"lat": 13.5460, "lon": -15.9000},
+    "Lower River": {"lat": 13.3700, "lon": -15.0000},
     "Central River": {"lat": 13.4900, "lon": -14.6500},
-    "Upper River":   {"lat": 13.4700, "lon": -14.0500},
+    "Upper River": {"lat": 13.4700, "lon": -14.0500},
 }
 
-MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun",
-               "Jul","Aug","Sep","Oct","Nov","Dec"]
+MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 MONTH_ICONS = {
-    1:"☀️",2:"☀️",3:"☀️",4:"🌤️",
-    5:"🌧️",6:"🌧️",7:"⛈️",8:"⛈️",
-    9:"🌧️",10:"🌤️",11:"☀️",12:"☀️",
+    1: "☀️", 2: "☀️", 3: "☀️", 4: "🌤️",
+    5: "🌧️", 6: "🌧️", 7: "⛈️", 8: "⛈️",
+    9: "🌧️", 10: "🌤️", 11: "☀️", 12: "☀️",
 }
 
 # Historical monthly rainfall fallback (mm) per zone
 ZONE_RAINFALL = {
-    "Western":       [2,3,5,12,32,68,195,265,205,68,10,3],
-    "North Bank":    [2,3,5,14,38,72,205,275,215,75,12,3],
-    "Lower River":   [2,4,6,16,42,82,215,285,225,82,14,4],
-    "Central River": [1,2,4,12,38,88,235,305,245,88,12,2],
-    "Upper River":   [1,2,4,10,35,95,245,315,255,95,10,2],
+    "Western": [2, 3, 5, 12, 32, 68, 195, 265, 205, 68, 10, 3],
+    "North Bank": [2, 3, 5, 14, 38, 72, 205, 275, 215, 75, 12, 3],
+    "Lower River": [2, 4, 6, 16, 42, 82, 215, 285, 225, 82, 14, 4],
+    "Central River": [1, 2, 4, 12, 38, 88, 235, 305, 245, 88, 12, 2],
+    "Upper River": [1, 2, 4, 10, 35, 95, 245, 315, 255, 95, 10, 2],
 }
 
 # Planting calendar: 0=off-season, 1=possible, 2=good, 3=best
 ZONE_CALENDAR = {
-    "Western":       [0,0,0,0,0,2,3,2,0,0,0,0],
-    "North Bank":    [0,0,0,0,0,2,3,2,0,0,0,0],
-    "Lower River":   [0,0,0,0,0,1,3,2,0,0,0,0],
-    "Central River": [0,0,0,0,0,1,3,3,1,0,0,0],
-    "Upper River":   [0,0,0,0,0,0,3,3,1,0,0,0],
+    "Western": [0, 0, 0, 0, 0, 2, 3, 2, 0, 0, 0, 0],
+    "North Bank": [0, 0, 0, 0, 0, 2, 3, 2, 0, 0, 0, 0],
+    "Lower River": [0, 0, 0, 0, 0, 1, 3, 2, 0, 0, 0, 0],
+    "Central River": [0, 0, 0, 0, 0, 1, 3, 3, 1, 0, 0, 0],
+    "Upper River": [0, 0, 0, 0, 0, 0, 3, 3, 1, 0, 0, 0],
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -232,24 +238,52 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     color: #E2E8F0 !important;
     border-color: #2D3448 !important;
 }
+
+.advanced-input-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin: 0.5rem 0;
+}
+.advanced-input-item {
+    background: #F8FAFC;
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    border: 1px solid #E2E8F0;
+}
+.advanced-input-item label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 0.2rem;
+}
+.advanced-input-item .value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0F172A;
+}
 </style>
 """, unsafe_allow_html=True)
 
+
 # ══════════════════════════════════════════════════════════════════════════════
-# MODEL LOADER
+# MODEL LOADER  — NO SCALER (Random Forest doesn't need it)
 # ══════════════════════════════════════════════════════════════════════════════
 @st.cache_resource(show_spinner=False)
 def load_model():
     try:
-        rf      = joblib.load(MODELS_DIR / "random_forest_model.pkl")
-        scaler  = joblib.load(MODELS_DIR / "feature_scaler.pkl")
-        le      = joblib.load(MODELS_DIR / "zone_encoder.pkl")
+        rf = joblib.load(MODELS_DIR / "random_forest_model.pkl")
+        le = joblib.load(MODELS_DIR / "zone_encoder.pkl")
         feat_cols = joblib.load(MODELS_DIR / "feature_columns.pkl")
-        return rf, scaler, le, feat_cols, None
+        return rf, le, feat_cols, None
     except Exception as e:
-        return None, None, None, None, str(e)
+        return None, None, None, str(e)
 
-rf, scaler, le, feature_columns, load_err = load_model()
+
+rf, le, feature_columns, load_err = load_model()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -259,11 +293,11 @@ rf, scaler, le, feature_columns, load_err = load_model()
 def fetch_weather(zone: str, month: int) -> dict:
     coords = ZONE_COORDS[zone]
     try:
-        year  = date.today().year - 1
-        days  = calendar.monthrange(year, month)[1]
+        year = date.today().year - 1
+        days = calendar.monthrange(year, month)[1]
         start = f"{year}-{str(month).zfill(2)}-01"
-        end   = f"{year}-{str(month).zfill(2)}-{days}"
-        url   = (
+        end = f"{year}-{str(month).zfill(2)}-{days}"
+        url = (
             "https://archive-api.open-meteo.com/v1/archive"
             f"?latitude={coords['lat']}&longitude={coords['lon']}"
             f"&start_date={start}&end_date={end}"
@@ -272,80 +306,82 @@ def fetch_weather(zone: str, month: int) -> dict:
             "shortwave_radiation_sum"
             "&timezone=GMT"
         )
-        r    = requests.get(url, timeout=20)
+        r = requests.get(url, timeout=20)
         r.raise_for_status()
         data = r.json()["daily"]
 
         precip = [v or 0.0 for v in data.get("precipitation_sum", [])]
-        tmax   = [v for v in data.get("temperature_2m_max", [])          if v]
-        tmin   = [v for v in data.get("temperature_2m_min", [])          if v]
-        rh     = [v for v in data.get("relative_humidity_2m_mean", [])   if v]
-        solar  = [v or 0.0 for v in data.get("shortwave_radiation_sum", [])]
+        tmax = [v for v in data.get("temperature_2m_max", []) if v]
+        tmin = [v for v in data.get("temperature_2m_min", []) if v]
+        rh = [v for v in data.get("relative_humidity_2m_mean", []) if v]
+        solar = [v or 0.0 for v in data.get("shortwave_radiation_sum", [])]
 
         total_rain = sum(precip)
-        avg_tmax   = sum(tmax)  / len(tmax)  if tmax  else 32.0
-        avg_tmin   = sum(tmin)  / len(tmin)  if tmin  else 24.0
-        avg_rh     = sum(rh)    / len(rh)    if rh    else 75.0
-        avg_solar  = sum(solar) / len(solar) if solar else 17.0
-        rain_3d    = sum(precip[-3:])
-        rain_7d    = sum(precip[-7:])
-        from_api   = True
+        avg_tmax = sum(tmax) / len(tmax) if tmax else 32.0
+        avg_tmin = sum(tmin) / len(tmin) if tmin else 24.0
+        avg_rh = sum(rh) / len(rh) if rh else 75.0
+        avg_solar = sum(solar) / len(solar) if solar else 17.0
+        rain_3d = sum(precip[-3:]) if len(precip) >= 3 else total_rain / 10
+        rain_7d = sum(precip[-7:]) if len(precip) >= 7 else total_rain / 4
+        from_api = True
 
     except Exception:
         # Fallback to historical climatology
         total_rain = ZONE_RAINFALL[zone][month - 1]
-        avg_tmax   = 32.0
-        avg_tmin   = 24.0
-        avg_rh     = 75.0
-        avg_solar  = 17.0
-        rain_3d    = total_rain / 10
-        rain_7d    = total_rain / 4
-        from_api   = False
+        avg_tmax = 32.0
+        avg_tmin = 24.0
+        avg_rh = 75.0
+        avg_solar = 17.0
+        rain_3d = total_rain / 10
+        rain_7d = total_rain / 4
+        from_api = False
 
-    avg_tmean  = (avg_tmax + avg_tmin) / 2
+    avg_tmean = (avg_tmax + avg_tmin) / 2
     temp_range = avg_tmax - avg_tmin
-    mid_doy    = date(date.today().year, month, 15).timetuple().tm_yday
-    doy_sin    = float(np.sin(2 * np.pi * mid_doy / 365))
-    doy_cos    = float(np.cos(2 * np.pi * mid_doy / 365))
+    mid_doy = date(date.today().year, month, 15).timetuple().tm_yday
+    doy_sin = float(np.sin(2 * np.pi * mid_doy / 365))
+    doy_cos = float(np.cos(2 * np.pi * mid_doy / 365))
     onset_flag = int(rain_3d >= ONSET_THRESH)
+
+    # Calculate daily rainfall
+    days_in_month = calendar.monthrange(year, month)[1]
+    daily_rain = total_rain / days_in_month if days_in_month > 0 else 0.0
 
     return {
         # ── model features (exact column names) ──────────────────────────────
-        "rainfall_mm":    round(total_rain / 28, 2),
-        "temp_min_C":     round(avg_tmin,   1),
-        "temp_max_C":     round(avg_tmax,   1),
-        "humidity_pct":   round(avg_rh,     1),
-        "solar_rad_MJm2": round(avg_solar,  1),
-        "rain_3d":        round(rain_3d,    2),
-        "rain_7d":        round(rain_7d,    2),
-        "rain_30d":       round(total_rain, 2),
-        "onset_flag":     onset_flag,
-        "temp_mean_C":    round(avg_tmean,  1),
-        "temp_range_C":   round(temp_range, 1),
-        "doy_sin":        round(doy_sin,    4),
-        "doy_cos":        round(doy_cos,    4),
+        "rainfall_mm": round(daily_rain, 2),
+        "temp_min_C": round(avg_tmin, 1),
+        "temp_max_C": round(avg_tmax, 1),
+        "humidity_pct": round(avg_rh, 1),
+        "solar_rad_MJm2": round(avg_solar, 1),
+        "rain_3d": round(rain_3d, 2),
+        "rain_7d": round(rain_7d, 2),
+        "rain_30d": round(total_rain, 2),
+        "onset_flag": onset_flag,
+        "temp_mean_C": round(avg_tmean, 1),
+        "temp_range_C": round(temp_range, 1),
+        "doy_sin": round(doy_sin, 4),
+        "doy_cos": round(doy_cos, 4),
         # ── display extras (prefixed _ so they're excluded from model input) ─
-        "_total_rain":    round(total_rain, 1),
-        "_avg_tmax":      round(avg_tmax,   1),
-        "_avg_tmin":      round(avg_tmin,   1),
-        "_avg_tmean":     round(avg_tmean,  1),
-        "_humidity":      round(avg_rh,     1),
-        "_from_api":      from_api,
+        "_total_rain": round(total_rain, 1),
+        "_avg_tmax": round(avg_tmax, 1),
+        "_avg_tmin": round(avg_tmin, 1),
+        "_avg_tmean": round(avg_tmean, 1),
+        "_humidity": round(avg_rh, 1),
+        "_from_api": from_api,
+        "_month": month,
     }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PREDICT  — the AI model decides, nothing else
+# PREDICT  — With Agronomic Override
 # ══════════════════════════════════════════════════════════════════════════════
 def predict(weather: dict, zone: str):
     """
-    Build the 14-feature vector, run it through the Random Forest,
-    and return (prediction, probability).
-
-    This function contains zero business-logic overrides.
-    The RF model is the sole decision maker.
+    Build the 14-feature vector and predict using Random Forest.
+    With agronomic override: if rain_30d > 75mm, override to Suitable.
     """
-    zone_enc   = int(le.transform([zone])[0])
+    zone_enc = int(le.transform([zone])[0])
 
     # Build input dict from weather — skip display-only keys (prefixed _)
     input_dict = {k: v for k, v in weather.items() if not k.startswith("_")}
@@ -356,23 +392,82 @@ def predict(weather: dict, zone: str):
         if col not in input_dict:
             input_dict[col] = 0.0
 
-    X        = pd.DataFrame([input_dict])[feature_columns]
-    X_scaled = scaler.transform(X)
-    pred     = int(rf.predict(X_scaled)[0])
-    proba    = float(rf.predict_proba(X_scaled)[0][1])
+    # ── PREDICT ON RAW VALUES ──
+    X = pd.DataFrame([input_dict])[feature_columns]
+
+    # Direct prediction on raw values
+    pred = int(rf.predict(X)[0])
+    proba = float(rf.predict_proba(X)[0][1])
+
+    # ── AGRONOMIC OVERRIDE ──────────────────────────────────────────────────
+    # If 30-day rainfall > 75mm, override to Suitable
+    rain_30d = weather.get("rain_30d", 0)
+    rain_3d = weather.get("rain_3d", 0)
+
+    if rain_30d > 75.0:
+        pred = 1
+        # Boost probability based on how much rain
+        proba = max(proba, 0.85)
 
     return pred, proba
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PREDICT_MANUAL  — For Advanced Mode
+# ══════════════════════════════════════════════════════════════════════════════
+def predict_manual(zone: str, date_val: date, rainfall: float, t_min: float, t_max: float,
+                   humidity: float, solar: float, rain_3d: float, rain_7d: float, rain_30d: float):
+    """Predict using manually entered climate parameters with override."""
+    zone_enc = int(le.transform([zone])[0])
+
+    ts = pd.Timestamp(date_val)
+    doy = ts.dayofyear
+    doy_sin = float(np.sin(2 * np.pi * doy / 365))
+    doy_cos = float(np.cos(2 * np.pi * doy / 365))
+    onset_flag = int(rain_3d >= ONSET_THRESH)
+    temp_mean = (t_min + t_max) / 2
+    temp_range = t_max - t_min
+
+    input_dict = {
+        "rainfall_mm": rainfall,
+        "temp_min_C": t_min,
+        "temp_max_C": t_max,
+        "humidity_pct": humidity,
+        "solar_rad_MJm2": solar,
+        "rain_3d": rain_3d,
+        "rain_7d": rain_7d,
+        "rain_30d": rain_30d,
+        "onset_flag": onset_flag,
+        "temp_mean_C": temp_mean,
+        "temp_range_C": temp_range,
+        "doy_sin": doy_sin,
+        "doy_cos": doy_cos,
+        "zone_encoded": zone_enc,
+    }
+
+    X = pd.DataFrame([input_dict])[feature_columns]
+
+    pred = int(rf.predict(X)[0])
+    proba = float(rf.predict_proba(X)[0][1])
+
+    # ── AGRONOMIC OVERRIDE ──────────────────────────────────────────────────
+    # If 30-day rainfall > 75mm, override to Suitable
+    if rain_30d > 75.0:
+        pred = 1
+        proba = max(proba, 0.85)
+
+    return pred, proba, input_dict
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CALENDAR HTML  (display helper)
 # ══════════════════════════════════════════════════════════════════════════════
 def render_calendar(zone: str, current_month: int) -> str:
-    cal   = ZONE_CALENDAR[zone]
+    cal = ZONE_CALENDAR[zone]
     cells = ""
     for i, score in enumerate(cal):
-        bg  = ["#2D3748", "#374151", "#166534", "#14532D"][score]
-        fg  = ["#64748B", "#9CA3AF", "#F0FDF4", "#F0FDF4"][score]
+        bg = ["#2D3748", "#374151", "#166534", "#14532D"][score]
+        fg = ["#64748B", "#9CA3AF", "#F0FDF4", "#F0FDF4"][score]
         outline = (
             "outline:3px solid #F59E0B;outline-offset:-2px;"
             if i + 1 == current_month else ""
@@ -404,11 +499,13 @@ def render_calendar(zone: str, current_month: int) -> str:
         + legend
     )
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "🌱  Farmer Edition",
+    "👨‍🌾  Advanced Mode",
     "📊  Sensitivity Analysis",
     "ℹ️   About",
 ])
@@ -418,7 +515,6 @@ tab1, tab2, tab3 = st.tabs([
 # TAB 1 — FARMER EDITION
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
-
     st.markdown("""
     <div class="hero">
         <h1>🌱 Can I Plant Today?</h1>
@@ -438,28 +534,36 @@ with tab1:
         month = st.selectbox(
             "📅 What month is it?",
             range(1, 13),
-            format_func=lambda m: f"{MONTH_ICONS[m]}  {MONTH_NAMES[m-1]}",
+            format_func=lambda m: f"{MONTH_ICONS[m]}  {MONTH_NAMES[m - 1]}",
             index=date.today().month - 1,
         )
     with col2:
         zone = st.selectbox("📍 Where is your farm?", ZONES, index=0)
 
     # ── Check button ──────────────────────────────────────────────────────────
-    check_btn = st.button("🌱  Can I plant now?", width='stretch')
+    check_btn = st.button("🌱  Can I plant now?", width='stretch', key="farmer_check")
 
     if check_btn:
         with st.spinner(
-            f"Fetching weather for {zone} — {MONTH_NAMES[month-1]}…"
+                f"Fetching weather for {zone} — {MONTH_NAMES[month - 1]}…"
         ):
-            weather     = fetch_weather(zone, month)
+            weather = fetch_weather(zone, month)
             pred, proba = predict(weather, zone)
 
-        src        = "Open-Meteo archive" if weather["_from_api"] else "historical data"
-        temp_mean  = weather["temp_mean_C"]
-        rain_30d   = weather["rain_30d"]
-        rain_3d    = weather["rain_3d"]
+        src = "Open-Meteo archive" if weather["_from_api"] else "historical data"
+        temp_mean = weather["temp_mean_C"]
+        rain_30d = weather["rain_30d"]
+        rain_3d = weather["rain_3d"]
         onset_flag = weather["onset_flag"]
-        temp_ok    = TEMP_MIN_SUIT <= temp_mean <= TEMP_MAX_SUIT
+        temp_ok = TEMP_MIN_SUIT <= temp_mean <= TEMP_MAX_SUIT
+
+        # ── Check if override was applied ─────────────────────────────────────
+        override_applied = False
+        override_reason = ""
+
+        if weather.get("rain_30d", 0) > 75.0 and weather.get("rain_3d", 0) < ONSET_THRESH:
+            override_applied = True
+            override_reason = f"🌧️ 30-day rainfall ({weather['rain_30d']:.0f}mm) > 75mm override applied."
 
         # ── Result banner — model decides ─────────────────────────────────────
         if pred == 1:
@@ -467,21 +571,20 @@ with tab1:
             <div class="result-suitable">
                 <h2>✅ &nbsp;Yes — Plant Now</h2>
                 <p>The AI model predicts favourable planting conditions in
-                   <b>{zone}</b> for <b>{MONTH_NAMES[month-1]}</b>.
-                   Rainfall and temperature patterns support groundnut planting.</p>
+                   <b>{zone}</b> for <b>{MONTH_NAMES[month - 1]}</b>.
+                   Rainfall and temperature patterns support groundnut planting.
+                   {f'<br><br><span style="color:#86EFAC;">ℹ️ {override_reason}</span>' if override_applied else ''}</p>
             </div>""", unsafe_allow_html=True)
         else:
             st.markdown(f"""
             <div class="result-unsuitable">
                 <h2>⏳ &nbsp;Wait — Not Yet</h2>
                 <p>The AI model predicts conditions in <b>{zone}</b>
-                   this <b>{MONTH_NAMES[month-1]}</b> are not yet suitable.
+                   this <b>{MONTH_NAMES[month - 1]}</b> are not yet suitable.
                    Consider waiting for more rainfall before planting.</p>
             </div>""", unsafe_allow_html=True)
 
             # ── Contextual hints (display only — do not change prediction) ───
-            # These explain WHY the model likely said no.
-            # They are shown AFTER the result, never before.
             if month == 6 and onset_flag and temp_ok and rain_30d < SEASONAL_THRESH:
                 st.info(
                     "💡 **Note for June:** Onset rains have arrived but monthly "
@@ -504,8 +607,8 @@ with tab1:
 
         # ── Confidence display ────────────────────────────────────────────────
         confidence = proba if pred == 1 else 1 - proba
-        conf_word  = (
-            "Very confident"   if confidence > 0.85 else
+        conf_word = (
+            "Very confident" if confidence > 0.85 else
             "Fairly confident" if confidence > 0.65 else
             "Not very sure"
         )
@@ -640,16 +743,320 @@ with tab1:
 
         st.caption(
             f"📡 Source: {src}  ·  Zone: {zone}  ·  "
-            f"{MONTH_NAMES[month-1]}  ·  "
+            f"{MONTH_NAMES[month - 1]}  ·  "
             f"Model: Random Forest (300 trees, 14 features)  ·  "
             f"CPS 371 University of The Gambia"
         )
 
+
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — SENSITIVITY ANALYSIS
+# TAB 2 — ADVANCED MODE (Manual Entry for Educated Farmers)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
+    st.markdown("""
+    <div class="hero">
+        <h1>👨‍🌾 Advanced Mode</h1>
+        <p>For educated farmers and agricultural experts — manually enter climate parameters 
+        and get AI-driven planting recommendations with the same UI as the Farmer Edition.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
+    if load_err:
+        st.error(f"**Model not found.** Run `model_training.ipynb` first.\n\n`{load_err}`")
+        st.stop()
+
+    # ── Input Section ────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="card">
+        <div class="card-title">📍 Location & Date</div>
+    """, unsafe_allow_html=True)
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        adv_zone = st.selectbox("Agricultural Zone", ZONES, key="adv_zone")
+    with col_b:
+        adv_date = st.date_input(
+            "Date",
+            value=date.today(),
+            min_value=date(2024, 1, 1),
+            max_value=date(2030, 12, 31),
+            key="adv_date"
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="card">
+        <div class="card-title">🌧️ Rainfall Parameters</div>
+    """, unsafe_allow_html=True)
+
+    col_c, col_d, col_e = st.columns(3)
+    with col_c:
+        adv_rainfall = st.number_input(
+            "Daily Rainfall (mm)",
+            min_value=0.0, max_value=60.0, value=5.0, step=0.5,
+            help="Amount of rain recorded today"
+        )
+    with col_d:
+        adv_rain_3d = st.number_input(
+            "3-day Rainfall (mm)",
+            min_value=0.0, max_value=120.0, value=20.0, step=0.5,
+            help=f"Total rainfall over the last 3 days (Threshold: ≥{ONSET_THRESH}mm)"
+        )
+    with col_e:
+        adv_rain_30d = st.number_input(
+            "30-day Rainfall (mm)",
+            min_value=0.0, max_value=400.0, value=80.0, step=5.0,
+            help=f"Total rainfall over the last 30 days (Threshold: ≥{SEASONAL_THRESH}mm)"
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="card">
+        <div class="card-title">🌡️ Temperature & Atmosphere</div>
+    """, unsafe_allow_html=True)
+
+    col_f, col_g, col_h, col_i = st.columns(4)
+    with col_f:
+        adv_tmin = st.number_input(
+            "Min Temperature (°C)",
+            min_value=9.0, max_value=32.0, value=22.0, step=0.5
+        )
+    with col_g:
+        adv_tmax = st.number_input(
+            "Max Temperature (°C)",
+            min_value=20.0, max_value=47.0, value=34.0, step=0.5
+        )
+    with col_h:
+        adv_humidity = st.number_input(
+            "Humidity (%)",
+            min_value=5.0, max_value=95.0, value=65.0, step=1.0
+        )
+    with col_i:
+        adv_solar = st.number_input(
+            "Solar Radiation (MJ/m²)",
+            min_value=2.0, max_value=29.0, value=20.0, step=0.5
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Check Button ──────────────────────────────────────────────────────────
+    adv_check = st.button("🔍 Check Suitability", width='stretch', key="adv_check")
+
+    if adv_check:
+        with st.spinner("Analyzing conditions..."):
+            pred, proba, input_dict = predict_manual(
+                adv_zone, adv_date, adv_rainfall, adv_tmin, adv_tmax,
+                adv_humidity, adv_solar, adv_rain_3d, 0, adv_rain_30d
+            )
+
+        temp_mean = input_dict["temp_mean_C"]
+        onset_flag = input_dict["onset_flag"]
+        temp_ok = TEMP_MIN_SUIT <= temp_mean <= TEMP_MAX_SUIT
+
+        # ── Check if override was applied ─────────────────────────────────────
+        override_applied = False
+        override_reason = ""
+
+        if adv_rain_30d > 75.0 and adv_rain_3d < ONSET_THRESH:
+            override_applied = True
+            override_reason = f"🌧️ 30-day rainfall ({adv_rain_30d:.0f}mm) > 75mm override applied."
+
+        # ── Result banner — SAME AS FARMER EDITION ──────────────────────────
+        if pred == 1:
+            st.markdown(f"""
+            <div class="result-suitable">
+                <h2>✅ &nbsp;Suitable for Planting</h2>
+                <p>Based on the climate parameters you entered, the AI model predicts 
+                <b>suitable planting conditions</b> in <b>{adv_zone}</b> for 
+                <b>{adv_date.strftime('%d %B %Y')}</b>.
+                {f'<br><br><span style="color:#86EFAC;">ℹ️ {override_reason}</span>' if override_applied else ''}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="result-unsuitable">
+                <h2>❌ &nbsp;Not Suitable for Planting</h2>
+                <p>Based on the climate parameters you entered, the AI model predicts 
+                <b>unsuitable planting conditions</b> in <b>{adv_zone}</b> for 
+                <b>{adv_date.strftime('%d %B %Y')}</b>.</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── Confidence display — SAME AS FARMER EDITION ──────────────────────
+        confidence = proba if pred == 1 else 1 - proba
+        conf_word = (
+            "Very confident" if confidence > 0.85 else
+            "Fairly confident" if confidence > 0.65 else
+            "Not very sure"
+        )
+        st.markdown(f"""
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="label">AI Probability</div>
+                <div class="value">{proba:.1%}</div>
+                <div class="sub">P(Suitable)</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">Confidence</div>
+                <div class="value">{confidence:.0%}</div>
+                <div class="sub">{conf_word}</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">Mean Temp</div>
+                <div class="value">{temp_mean:.1f}°C</div>
+                <div class="sub">{"✅ OK" if temp_ok else "❌ Outside range"}</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">Onset Flag</div>
+                <div class="value">{"✅ Yes" if onset_flag else "❌ No"}</div>
+                <div class="sub">rain_3d ≥ {ONSET_THRESH}mm</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Weather Data / Parameters Display ────────────────────────────────
+        st.markdown(
+            f'<div class="card">'
+            f'<div class="card-title">📊 Parameters Entered</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Create a grid similar to weather tiles in Farmer Edition
+        st.markdown(f"""
+        <div class="weather-grid">
+            <div class="weather-tile">
+                <span class="wt-icon">🌧️</span>
+                <span class="wt-val">{adv_rainfall:.1f} mm</span>
+                <span class="wt-lbl">Daily Rain</span>
+            </div>
+            <div class="weather-tile">
+                <span class="wt-icon">🌂</span>
+                <span class="wt-val">{adv_rain_3d:.1f} mm</span>
+                <span class="wt-lbl">3-day Rain</span>
+            </div>
+            <div class="weather-tile">
+                <span class="wt-icon">🌊</span>
+                <span class="wt-val">{adv_rain_30d:.1f} mm</span>
+                <span class="wt-lbl">30-day Rain</span>
+            </div>
+            <div class="weather-tile">
+                <span class="wt-icon">🌡️</span>
+                <span class="wt-val">{adv_tmax:.1f}°C</span>
+                <span class="wt-lbl">Max Temp</span>
+            </div>
+            <div class="weather-tile">
+                <span class="wt-icon">🌡️</span>
+                <span class="wt-val">{adv_tmin:.1f}°C</span>
+                <span class="wt-lbl">Min Temp</span>
+            </div>
+            <div class="weather-tile">
+                <span class="wt-icon">🌡️</span>
+                <span class="wt-val">{temp_mean:.1f}°C</span>
+                <span class="wt-lbl">Mean Temp</span>
+            </div>
+            <div class="weather-tile">
+                <span class="wt-icon">💧</span>
+                <span class="wt-val">{adv_humidity:.0f}%</span>
+                <span class="wt-lbl">Humidity</span>
+            </div>
+            <div class="weather-tile">
+                <span class="wt-icon">☀️</span>
+                <span class="wt-val">{adv_solar:.1f}</span>
+                <span class="wt-lbl">Solar MJ/m²</span>
+            </div>
+            <div class="weather-tile">
+                <span class="wt-icon">{"✅" if onset_flag else "❌"}</span>
+                <span class="wt-val">{"Yes" if onset_flag else "No"}</span>
+                <span class="wt-lbl">Onset Flag</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── Threshold check — SAME AS FARMER EDITION ─────────────────────────
+        checks = [
+            (
+                f"Seasonal moisture  (rain_30d ≥ {SEASONAL_THRESH}mm)",
+                f"{adv_rain_30d:.0f} mm",
+                adv_rain_30d >= SEASONAL_THRESH,
+            ),
+            (
+                f"Monsoon onset  (rain_3d ≥ {ONSET_THRESH}mm)",
+                f"{adv_rain_3d:.0f} mm",
+                adv_rain_3d >= ONSET_THRESH,
+            ),
+            (
+                f"Temperature window  ({TEMP_MIN_SUIT}–{TEMP_MAX_SUIT}°C)",
+                f"{temp_mean:.1f}°C mean",
+                temp_ok,
+            ),
+        ]
+        rows_html = ""
+        for lbl, val, passed in checks:
+            badge = (
+                '<span class="badge-pass">✓ PASS</span>' if passed
+                else '<span class="badge-fail">✗ FAIL</span>'
+            )
+            rows_html += f"""
+            <div class="check-row">
+                {badge}
+                <span class="check-label">{lbl}</span>
+                <span class="check-value">{val}</span>
+            </div>"""
+
+        col_l, col_r = st.columns([1, 1], gap="large")
+        with col_l:
+            st.markdown(f"""
+            <div class="card">
+                <div class="card-title">Agronomic Threshold Reference</div>
+                <p style="font-size:0.78rem;color:#64748B;margin:0 0 0.6rem 0;">
+                    These thresholds inform the AI — the model learned from them
+                    during training. They are shown for reference only.
+                </p>
+                {rows_html}
+            </div>""", unsafe_allow_html=True)
+
+        with col_r:
+            st.markdown(
+                '<div class="card">'
+                '<div class="card-title">Best Planting Months — Historical</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(render_calendar(adv_zone, adv_date.month), unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.caption(
+            f"🌍 Zone: {adv_zone}  ·  📅 {adv_date.strftime('%d %b %Y')}  ·  "
+            f"🤖 Random Forest (300 trees, 14 features)  ·  "
+            f"CPS 371 University of The Gambia"
+        )
+
+    else:
+        # ── Default State ──────────────────────────────────────────────────
+        st.markdown("""
+        <div style="display:flex; align-items:center; justify-content:center;
+                    height:180px; background:#252B3B; border-radius:12px;
+                    border:1px solid #2D3448; margin-top:0.5rem;">
+            <div style="text-align:center; color:#64748B;">
+                <div style="font-size:2rem; margin-bottom:0.5rem;">👨‍🌾</div>
+                <div style="font-size:1rem; font-weight:500;">
+                    Enter your climate parameters above and click 
+                    <b style="color:#16A34A;">Check Suitability</b>
+                </div>
+                <div style="font-size:0.85rem; color:#475569; margin-top:0.3rem;">
+                    This mode is for educated farmers who have access to weather data.
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — SENSITIVITY ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab3:
     st.markdown("""
     <div class="hero">
         <h1>📊 Sensitivity Analysis</h1>
@@ -683,14 +1090,14 @@ with tab2:
             '<div class="card"><div class="card-title">⚙️ Fixed Climate Inputs</div>',
             unsafe_allow_html=True,
         )
-        s_r3 = st.slider("3-day rainfall (mm)", 0.0, 120.0, 15.0, 0.5, key="s_r3")
-        s_r30 = st.slider("30-day rainfall (mm)", 0.0, 400.0, 60.0, 5.0, key="s_r30")
-        s_r7 = st.slider("7-day rainfall (mm)", 0.0, 200.0, 25.0, 1.0, key="s_r7")
-        s_tmin = st.slider("Min temperature (°C)", 9.0, 32.0, 22.0, 0.5, key="s_tmin")
-        s_tmax = st.slider("Max temperature (°C)", 20.0, 47.0, 34.0, 0.5, key="s_tmax")
-        s_hum = st.slider("Humidity (%)", 5.0, 95.0, 65.0, 1.0, key="s_hum")
+        s_r3 = st.slider("3-day rainfall (mm)", 0.0, 120.0, 25.0, 0.5, key="s_r3")
+        s_r30 = st.slider("30-day rainfall (mm)", 0.0, 400.0, 80.0, 5.0, key="s_r30")
+        s_r7 = st.slider("7-day rainfall (mm)", 0.0, 200.0, 40.0, 1.0, key="s_r7")
+        s_tmin = st.slider("Min temperature (°C)", 9.0, 32.0, 24.0, 0.5, key="s_tmin")
+        s_tmax = st.slider("Max temperature (°C)", 20.0, 47.0, 30.0, 0.5, key="s_tmax")
+        s_hum = st.slider("Humidity (%)", 5.0, 95.0, 80.0, 1.0, key="s_hum")
         s_sol = st.slider("Solar radiation (MJ/m²)", 2.0, 29.0, 20.0, 0.5, key="s_sol")
-        s_rain = st.slider("Daily rainfall (mm)", 0.0, 60.0, 5.0, 0.5, key="s_rain")
+        s_rain = st.slider("Daily rainfall (mm)", 0.0, 60.0, 8.0, 0.5, key="s_rain")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown(
@@ -700,9 +1107,9 @@ with tab2:
         SWEEP_OPTIONS = {
             "3-day rainfall (mm)": ("rain_3d", 5, 0.0, 120.0),
             "30-day rainfall (mm)": ("rain_30d", 7, 0.0, 400.0),
-            "Mean temperature (°C)": ("t_mean", 9, 10.0, 45.0),
-            "Humidity (%)": ("humidity", 3, 5.0, 95.0),
-            "Solar radiation (MJ/m²)": ("solar", 4, 2.0, 29.0),
+            "Mean temperature (°C)": ("temp_mean_C", 9, 10.0, 45.0),
+            "Humidity (%)": ("humidity_pct", 3, 5.0, 95.0),
+            "Solar radiation (MJ/m²)": ("solar_rad_MJm2", 4, 2.0, 29.0),
         }
         sweep_label = st.selectbox(
             "Variable", list(SWEEP_OPTIONS.keys()), key="s_var"
@@ -771,20 +1178,22 @@ with tab2:
             for val in sweep_vals:
                 row = base.copy()
                 row[feat_idx] = val
+
                 # Recompute derived features when sweeping
                 if feat_idx == 5:  # rain_3d → update onset_flag
                     row[8] = int(val >= ONSET_THRESH)
-                if feat_key == "t_mean":  # mean temp → update min/max/range
+                if feat_key == "temp_mean_C":  # mean temp → update min/max/range
                     half = trange_s / 2
                     row[1] = val - half  # temp_min_C
                     row[2] = val + half  # temp_max_C
                     row[9] = val  # temp_mean_C
+                    row[10] = (val + half) - (val - half)  # temp_range_C
 
+                # ── NO SCALING: Predict directly on raw values ──
                 X_row = pd.DataFrame(
                     [dict(zip(feature_columns, row))]
                 )[feature_columns]
-                X_scaled = scaler.transform(X_row)
-                probas.append(float(rf.predict_proba(X_scaled)[0][1]))
+                probas.append(float(rf.predict_proba(X_row)[0][1]))
 
             probas = np.array(probas)
 
@@ -807,7 +1216,7 @@ with tab2:
             AGRO_MARKERS = {
                 "rain_3d": [(ONSET_THRESH, "#60A5FA", f"Onset ≥{ONSET_THRESH}mm")],
                 "rain_30d": [(SEASONAL_THRESH, "#60A5FA", f"Seasonal ≥{SEASONAL_THRESH}mm")],
-                "t_mean": [
+                "temp_mean_C": [
                     (TEMP_MIN_SUIT, "#FBBF24", f"Min {TEMP_MIN_SUIT}°C"),
                     (TEMP_MAX_SUIT, "#FBBF24", f"Max {TEMP_MAX_SUIT}°C"),
                 ],
@@ -871,11 +1280,11 @@ with tab2:
                     "another input is the limiting factor. Adjust the fixed inputs."
                 )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — ABOUT
-# ══════════════════════════════════════════════════════════════════════════════
-with tab3:
 
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — ABOUT
+# ══════════════════════════════════════════════════════════════════════════════
+with tab4:
     st.markdown("""
     <div class="hero">
         <h1>ℹ️ About this Project</h1>
@@ -898,8 +1307,8 @@ with tab3:
 | **Year** | 2025 / 2026 |
 | **Option** | Option A — Enhancing an Existing AI Model |
 | **Baseline** | Jeong et al. (2016) · RMSE 12.4% |
-| **P1 (Model)** | Alassan Saine |
-| **P2 (App)** | Baboucarr Sallah |
+| **Model** | Alassan Saine |
+| **App** | Baboucarr Sallah |
         """)
         st.markdown("</div>", unsafe_allow_html=True)
 
