@@ -35,7 +35,8 @@ MODEL_FEATURES = [
     # Circular seasonality
     'doy_sin',
     'doy_cos',
-    'month',
+    # Location
+    'zone_encoded',
 ]
 
 LABEL_COL = 'suitable'
@@ -46,8 +47,8 @@ TRAIN_END_YEAR  = 2020
 TEST_START_YEAR = 2021
 
 # Agronomic thresholds (Sultan & Gaetani 2016, adapted for Gambia groundnut)
-ONSET_THRESH    = 20   # rain_3d  >= 20 mm  → onset_flag = 1
-SEASONAL_THRESH = 50   # rain_30d >= 50 mm
+ONSET_THRESH    = 18   # rain_3d  >= 20 mm  → onset_flag = 1
+SEASONAL_THRESH = 40   # rain_30d >= 50 mm
 TEMP_MIN_SUIT   = 20   # temp_mean_C >= 20 °C
 TEMP_MAX_SUIT   = 35   # temp_mean_C <= 35 °C
 
