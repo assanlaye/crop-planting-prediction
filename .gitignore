@@ -10,3 +10,4 @@ data/processed/
 # Ignore all generated figures and plots
 *.png
 report/figures/
+src/__pycache__/
